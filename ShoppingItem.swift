@@ -67,11 +67,13 @@ struct ShoppingItem: Identifiable, Codable, Hashable {
     var isChecked: Bool = false
     var quantity: Int = 1
     var unit: String = "Stk"
+    var imageURL: URL? = nil
     
-    init(name: String, category: ShoppingCategory? = nil) {
+    init(name: String, category: ShoppingCategory? = nil, imageURL: URL? = nil) {
         self.id = UUID()
         self.name = name
         self.category = category ?? ShoppingItem.categorizeItem(name: name)
+        self.imageURL = imageURL
     }
     
     static func categorizeItem(name: String) -> ShoppingCategory {
@@ -232,6 +234,11 @@ extension ShoppingItem {
 class ShoppingListManager: ObservableObject {
     @Published var items: [ShoppingItem] = []
     
+    // Asynchrone Suche via OpenFoodFacts
+    func searchProducts(query: String) async -> [ShoppingItem] {
+        return await OpenFoodFactsService.shared.search(query: query)
+    }
+    
     private let storageKey = "shopping_items_storage"
     /// Wird bei lokalen Änderungen aufgerufen (für Live-Sync). Remote-Änderungen sollen das NICHT triggern.
     var onLocalChange: ((ShoppingListChange) -> Void)?
@@ -382,6 +389,70 @@ struct ShoppingListChange: Codable {
     
     static func replaceAll(_ items: [ShoppingItem]) -> ShoppingListChange {
         ShoppingListChange(kind: .replaceAll, item: nil, id: nil, items: items)
+    }
+}
+
+// MARK: - OpenFoodFacts Service
+
+struct OFFProduct: Codable {
+    let product_name: String?
+    let image_url: String?
+    let image_front_url: String?
+    let image_small_url: String?
+    let brands: String?
+    
+    // Für die spätere Verwendung beim Mapping
+    var bestImageURL: URL? {
+        if let s = image_url ?? image_front_url ?? image_small_url {
+            return URL(string: s)
+        }
+        return nil
+    }
+}
+
+struct OFFSearchResponse: Codable {
+    let products: [OFFProduct]?
+    let count: Int?
+}
+
+class OpenFoodFactsService {
+    static let shared = OpenFoodFactsService()
+    
+    private init() {}
+    
+    func search(query: String) async -> [ShoppingItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+        
+        let encodedQuery = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        // page_size=20 für mehr Ergebnisse
+        let urlString = "https://world.openfoodfacts.org/cgi/search.pl?search_terms=\(encodedQuery)&search_simple=1&action=process&json=1&page_size=20"
+        
+        guard let url = URL(string: urlString) else { return [] }
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let decoder = JSONDecoder()
+            let response = try decoder.decode(OFFSearchResponse.self, from: data)
+            
+            guard let products = response.products else { return [] }
+            
+            return products.compactMap { product in
+                guard let name = product.product_name, !name.isEmpty else { return nil }
+                
+                var displayName = name
+                if let brand = product.brands, !brand.isEmpty {
+                    displayName = "\(brand) - \(name)"
+                }
+                
+                // Wir nutzen den Namen für die Standard-Kategorisierung
+                let item = ShoppingItem(name: displayName, imageURL: product.bestImageURL)
+                return item
+            }
+        } catch {
+            print("OpenFoodFacts Error: \(error)")
+            return []
+        }
     }
 }
 

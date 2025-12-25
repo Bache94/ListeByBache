@@ -363,6 +363,42 @@ struct ContentView: View {
                     .foregroundColor(item.isChecked ? .green : themeManager.secondaryTextColor)
             }
             
+            // Produktbild (Remote oder Fallback)
+            if let url = item.imageURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        ProgressView()
+                            .frame(width: 40, height: 40)
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 40, height: 40)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    case .failure:
+                        Image(systemName: item.artworkSymbolName)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 30, height: 30) // Fallback etwas kleiner
+                            .foregroundColor(themeManager.accentColor.opacity(0.5))
+                            .frame(width: 40, height: 40)
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+            } else {
+                // Fallback Artwork
+                ZStack {
+                    Circle()
+                        .fill(themeManager.accentColor.opacity(0.1))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: item.artworkSymbolName)
+                        .font(.system(size: 20))
+                        .foregroundColor(themeManager.accentColor)
+                }
+            }
+            
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.name)
                     .font(.body)
@@ -400,7 +436,7 @@ struct ContentView: View {
     // MARK: - Floating Input Area
     private var inputAreaView: some View {
         VStack(spacing: 0) {
-            if !suggestions.isEmpty {
+            if !suggestions.isEmpty || !onlineResults.isEmpty {
                 suggestionsListView
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -423,6 +459,7 @@ struct ContentView: View {
                         Button {
                             newItemName = ""
                             suggestions = []
+                            onlineResults = [] // Clear online results
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(themeManager.secondaryTextColor)
@@ -473,6 +510,7 @@ struct ContentView: View {
     private var suggestionsListView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 12) {
+                // Lokale Vorschläge
                 ForEach(suggestions) { suggestion in
                     Button {
                         addSuggestedItem(suggestion)
@@ -481,6 +519,43 @@ struct ContentView: View {
                             Image(systemName: suggestion.category.systemImage)
                                 .foregroundColor(colorFromString(suggestion.category.color))
                             Text(suggestion.name)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundColor(themeManager.primaryTextColor)
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(themeManager.surfaceColor)
+                        .clipShape(Capsule())
+                        .shadow(color: Color.black.opacity(0.1), radius: 4, x: 0, y: 2)
+                    }
+                }
+                
+                // Online Ergebnisse
+                ForEach(onlineResults) { item in
+                    Button {
+                        shoppingListManager.addItem(item)
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        newItemName = ""
+                        suggestions = []
+                        onlineResults = []
+                    } label: {
+                        HStack(spacing: 8) {
+                            if let url = item.imageURL {
+                                AsyncImage(url: url) { image in
+                                    image.resizable()
+                                         .aspectRatio(contentMode: .fit)
+                                } placeholder: {
+                                    ProgressView()
+                                }
+                                .frame(width: 24, height: 24)
+                                .clipShape(Circle())
+                            } else {
+                                Image(systemName: "globe")
+                                    .foregroundColor(themeManager.accentColor)
+                            }
+                            
+                            Text(item.name)
                                 .font(.subheadline)
                                 .fontWeight(.medium)
                                 .foregroundColor(themeManager.primaryTextColor)
@@ -518,8 +593,28 @@ struct ContentView: View {
     }
     
     private func updateSuggestions() {
+        // Lokale Vorschläge
         suggestions = SuggestionProvider.suggestions(for: newItemName)
+        
+        // Online-Suche (Debounce müsste man eigentlich machen, hier simpel)
+        if onlineSearchTask?.isCancelled == false {
+            onlineSearchTask?.cancel()
+        }
+        
+        onlineSearchTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000) // 300ms debounce
+            if !Task.isCancelled {
+                let results = await shoppingListManager.searchProducts(query: newItemName)
+                await MainActor.run {
+                    self.onlineResults = results
+                }
+            }
+        }
     }
+    
+    // Store task for cancellation
+    @State private var onlineSearchTask: Task<Void, Never>?
+    @State private var onlineResults: [ShoppingItem] = []
     
     private func deleteItems(_ offsets: IndexSet, in items: [ShoppingItem]) {
         let toRemove = offsets.compactMap { index in
