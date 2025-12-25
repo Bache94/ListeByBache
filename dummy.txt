@@ -1,0 +1,3 @@
+import SwiftUI
+
+// ... (Rest von SettingsView, wird via append erweitert)

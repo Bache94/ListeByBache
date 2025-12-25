@@ -1,0 +1,19 @@
+{
+	"name": "xcode build server",
+	"version": "0.2",
+	"bspVersion": "2.0",
+	"languages": [
+		"c",
+		"cpp",
+		"objective-c",
+		"objective-cpp",
+		"swift"
+	],
+	"argv": [
+		"/opt/homebrew/bin/xcode-build-server"
+	],
+	"workspace": "/Users/bache/Desktop/ListByBache/ListeByBache.xcworkspace",
+	"build_root": "/Users/bache/Library/Developer/Xcode/DerivedData/ListeByBache-bwjjzyqjcuwymlhktoongflffdlo",
+	"scheme": "ListeByBache",
+	"kind": "xcode"
+}
