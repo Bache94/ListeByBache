@@ -93,8 +93,27 @@ struct ShoppingItem: Identifiable, Codable, Hashable {
            lowercaseName.contains("wasser") || lowercaseName.contains("saft") ||
            lowercaseName.contains("getränk") || lowercaseName.contains("cola") ||
            lowercaseName.contains("limo") || lowercaseName.contains("alkohol") ||
-           lowercaseName.contains("schorle") || lowercaseName.contains("tee") ||
-           lowercaseName.contains("kaffee") || lowercaseName.contains("trank") {
+            lowercaseName.contains("schorle") || lowercaseName.contains("tee") ||
+            lowercaseName.contains("kaffee") || lowercaseName.contains("trank") ||
+            lowercaseName.contains("pils") || lowercaseName.contains("helles") ||
+            lowercaseName.contains("radler") || lowercaseName.contains("weizen") ||
+            lowercaseName.contains("stout") || lowercaseName.contains("ipa") ||
+            lowercaseName.contains("lager") || lowercaseName.contains("ale") ||
+            lowercaseName.contains("kölsch") || lowercaseName.contains("altbier") ||
+            lowercaseName.contains("export") || lowercaseName.contains("malz") ||
+            lowercaseName.contains("prosecco") || lowercaseName.contains("sekt") ||
+            lowercaseName.contains("champagner") || lowercaseName.contains("spirituose") ||
+            lowercaseName.contains("vodka") || lowercaseName.contains("wódka") ||
+            lowercaseName.contains("whisky") || lowercaseName.contains("whiskey") ||
+            lowercaseName.contains("gin") || lowercaseName.contains("rum") ||
+            lowercaseName.contains("tequila") || lowercaseName.contains("brandy") ||
+            lowercaseName.contains("cognac") || lowercaseName.contains("likör") ||
+            lowercaseName.contains("schnaps") || lowercaseName.contains("cocktail") ||
+            lowercaseName.contains("longdrink") || lowercaseName.contains("energy") ||
+            lowercaseName.contains("iso") || lowercaseName.contains("smoothie") ||
+            lowercaseName.contains("milch") || lowercaseName.contains("kakao") ||
+            lowercaseName.contains("cappuccino") || lowercaseName.contains("espresso") ||
+            lowercaseName.contains("drink") {
             return .getraenke
         }
         
@@ -400,6 +419,7 @@ struct OFFProduct: Codable {
     let image_front_url: String?
     let image_small_url: String?
     let brands: String?
+    let categories_tags: [String]?
     
     // Für die spätere Verwendung beim Mapping
     var bestImageURL: URL? {
@@ -445,8 +465,28 @@ class OpenFoodFactsService {
                     displayName = "\(brand) - \(name)"
                 }
                 
-                // Wir nutzen den Namen für die Standard-Kategorisierung
-                let item = ShoppingItem(name: displayName, imageURL: product.bestImageURL)
+                // Kategorie-Erkennung via API Tags
+                var category: ShoppingCategory? = nil
+                if let tags = product.categories_tags {
+                    // Check auf Getränke
+                    if tags.contains(where: { tag in
+                        let t = tag.lowercased()
+                        return t.contains("beverage") || t.contains("drink") || t.contains("water") ||
+                               t.contains("wine") || t.contains("beer") || t.contains("juice") ||
+                               t.contains("soda") || t.contains("tea") || t.contains("coffee") ||
+                               t.contains("milk") || t.contains("lemonade")
+                    }) {
+                        category = .getraenke
+                    }
+                    
+                    // Check auf Snacks/Süßigkeiten
+                    else if tags.contains(where: { $0.contains("snack") || $0.contains("sweet") || $0.contains("chocolate") || $0.contains("candy") }) {
+                        category = .suessigkeiten
+                    }
+                }
+                
+                // Wir nutzen den Namen für die Standard-Kategorisierung, falls API nichts lieferte
+                let item = ShoppingItem(name: displayName, category: category, imageURL: product.bestImageURL)
                 return item
             }
         } catch {
