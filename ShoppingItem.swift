@@ -445,8 +445,8 @@ class OpenFoodFactsService {
         guard !trimmed.isEmpty else { return [] }
         
         let encodedQuery = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        // page_size=20 für mehr Ergebnisse
-        let urlString = "https://world.openfoodfacts.org/cgi/search.pl?search_terms=\(encodedQuery)&search_simple=1&action=process&json=1&page_size=20"
+        // Wir fragen etwas mehr ab (page_size=40), um genug Material zum Filtern zu haben
+        let urlString = "https://world.openfoodfacts.org/cgi/search.pl?search_terms=\(encodedQuery)&search_simple=1&action=process&json=1&page_size=40"
         
         guard let url = URL(string: urlString) else { return [] }
         
@@ -457,12 +457,24 @@ class OpenFoodFactsService {
             
             guard let products = response.products else { return [] }
             
-            return products.compactMap { product in
+            let filteredProducts = products.compactMap { product -> ShoppingItem? in
                 guard let name = product.product_name, !name.isEmpty else { return nil }
                 
+                // 1. Filter: Keine kyrillischen Zeichen (russisch etc.)
+                if name.range(of: "\\p{Cyrillic}", options: .regularExpression) != nil {
+                    return nil
+                }
+                
                 var displayName = name
-                if let brand = product.brands, !brand.isEmpty {
-                    displayName = "\(brand) - \(name)"
+                let brand = product.brands ?? ""
+                
+                // 2. Name Cleaning: Marke entfernen, wenn sie schon im Namen steckt (z.B. "Ferrero Nutella" -> "Nutella")
+                // Oder wenn der User explizit danach gesucht hat.
+                if !brand.isEmpty {
+                    // Wenn der Name mit der Marke beginnt, z.B. "Ferrero Nutella", schneiden wir "Ferrero " ab
+                    if displayName.lowercased().hasPrefix(brand.lowercased() + " ") {
+                        displayName = String(displayName.dropFirst(brand.count + 1))
+                    }
                 }
                 
                 // Kategorie-Erkennung via API Tags
@@ -485,10 +497,31 @@ class OpenFoodFactsService {
                     }
                 }
                 
-                // Wir nutzen den Namen für die Standard-Kategorisierung, falls API nichts lieferte
-                let item = ShoppingItem(name: displayName, category: category, imageURL: product.bestImageURL)
-                return item
+                // Build Item
+                return ShoppingItem(name: displayName, category: category, imageURL: product.bestImageURL)
             }
+            
+            // 3. Deduplizierung: Gruppiere nach bereinigtem Namen (case-insensitive)
+            // Wir nehmen jeweils das Item mit Bild bevorzugt, sonst das erste.
+            var uniqueItems: [String: ShoppingItem] = [:]
+            
+            for item in filteredProducts {
+                let key = item.name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                if let existing = uniqueItems[key] {
+                    // Wenn bestehendes Item kein Bild hat, aber neues schon -> ersetzen
+                    if existing.imageURL == nil && item.imageURL != nil {
+                        uniqueItems[key] = item
+                    }
+                } else {
+                    uniqueItems[key] = item
+                }
+            }
+            
+            // Sortierung: Beste Matches (Query im Namen) zuerst, oder einfach unsortiert (Array from Values)
+            // Wir geben einfach die Values zurück, sortiert nach Name Länge (kürzer ist oft "generischer" und besser)
+            return uniqueItems.values.sorted { $0.name.count < $1.name.count }
+            
         } catch {
             print("OpenFoodFacts Error: \(error)")
             return []
