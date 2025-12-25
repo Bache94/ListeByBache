@@ -420,6 +420,7 @@ struct OFFProduct: Codable {
     let image_small_url: String?
     let brands: String?
     let categories_tags: [String]?
+    let countries_tags: [String]?
     
     // Für die spätere Verwendung beim Mapping
     var bestImageURL: URL? {
@@ -445,8 +446,8 @@ class OpenFoodFactsService {
         guard !trimmed.isEmpty else { return [] }
         
         let encodedQuery = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        // Wir fragen etwas mehr ab (page_size=40), um genug Material zum Filtern zu haben
-        let urlString = "https://world.openfoodfacts.org/cgi/search.pl?search_terms=\(encodedQuery)&search_simple=1&action=process&json=1&page_size=40"
+        // Wir nutzen de.openfoodfacts.org für primär deutsche Ergebnisse
+        let urlString = "https://de.openfoodfacts.org/cgi/search.pl?search_terms=\(encodedQuery)&search_simple=1&action=process&json=1&page_size=40"
         
         guard let url = URL(string: urlString) else { return [] }
         
@@ -460,9 +461,22 @@ class OpenFoodFactsService {
             let filteredProducts = products.compactMap { product -> ShoppingItem? in
                 guard let name = product.product_name, !name.isEmpty else { return nil }
                 
-                // 1. Filter: Keine kyrillischen Zeichen (russisch etc.)
+                // 1. Filter: Keine kyrillischen Zeichen
                 if name.range(of: "\\p{Cyrillic}", options: .regularExpression) != nil {
                     return nil
+                }
+                
+                // 2. Filter: Deutschland-Check (wenn Tags vorhanden sind)
+                // Wir sind strikt: Wenn countries_tags da sind, muss Deutschland dabei sein.
+                // Tags sind oft "en:germany", "de:deutschland" etc.
+                if let countries = product.countries_tags, !countries.isEmpty {
+                    let isGerman = countries.contains { tag in
+                        let t = tag.lowercased()
+                        return t.contains("germany") || t.contains("deutschland") || t.contains("allemagne")
+                    }
+                    if !isGerman {
+                        return nil
+                    }
                 }
                 
                 var displayName = name
