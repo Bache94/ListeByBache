@@ -213,6 +213,7 @@ final class SharedListSessionManager: ObservableObject {
             await pushFullSnapshotToCloud()
             await pullListNow()
             await pullChatNow()
+            await subscribeToChat(in: container.privateCloudDatabase, zoneID: zoneID)
             
         } catch {
             await setErrorAsync("iCloud Host fehlgeschlagen: \(Self.userFacing(error))")
@@ -241,6 +242,7 @@ final class SharedListSessionManager: ObservableObject {
             startPolling()
             await pullListNow()
             await pullChatNow()
+            await subscribeToChat(in: container.sharedCloudDatabase, zoneID: zoneID)
             
         } catch {
             await setErrorAsync("iCloud Join fehlgeschlagen: \(Self.userFacing(error))")
@@ -434,6 +436,26 @@ final class SharedListSessionManager: ObservableObject {
         }
     }
     
+    private func subscribeToChat(in db: CKDatabase, zoneID: CKRecordZone.ID) async {
+        let subscriptionID = "lb-chat-\(zoneID.zoneName)"
+        let subscription = CKRecordZoneSubscription(zoneID: zoneID, subscriptionID: subscriptionID)
+        
+        let info = CKSubscription.NotificationInfo()
+        info.alertLocalizationKey = "Neue Nachricht von %1$@"
+        info.alertLocalizationArgs = [Schema.chatSenderField]
+        info.soundName = "default"
+        
+        subscription.notificationInfo = info
+        subscription.recordType = Schema.chatType
+        
+        do {
+            _ = try await modify(subscriptionsToSave: [subscription], subscriptionIDsToDelete: [], in: db)
+        } catch {
+            // Subscription Fehler sind oft nicht kritisch (z.B. schon vorhanden), wir loggen nur
+            print("Subscription Warning: \(error)")
+        }
+    }
+    
     // MARK: - CloudKit helpers
     
     private func ensureICloudAvailable() async throws {
@@ -614,6 +636,19 @@ private extension SharedListSessionManager {
                                                   recordZoneIDsToDelete: zoneIDsToDelete.isEmpty ? nil : zoneIDsToDelete)
             op.qualityOfService = .userInitiated
             op.modifyRecordZonesCompletionBlock = { saved, deleted, error in
+                if let error { cont.resume(throwing: error); return }
+                cont.resume(returning: (saved ?? [], deleted ?? []))
+            }
+            db.add(op)
+        }
+    }
+    
+    func modify(subscriptionsToSave: [CKSubscription], subscriptionIDsToDelete: [CKSubscription.ID], in db: CKDatabase) async throws -> ([CKSubscription], [CKSubscription.ID]) {
+        try await withCheckedThrowingContinuation { cont in
+            let op = CKModifySubscriptionsOperation(subscriptionsToSave: subscriptionsToSave.isEmpty ? nil : subscriptionsToSave,
+                                                    subscriptionIDsToDelete: subscriptionIDsToDelete.isEmpty ? nil : subscriptionIDsToDelete)
+            op.qualityOfService = .userInitiated
+            op.modifySubscriptionsCompletionBlock = { saved, deleted, error in
                 if let error { cont.resume(throwing: error); return }
                 cont.resume(returning: (saved ?? [], deleted ?? []))
             }
